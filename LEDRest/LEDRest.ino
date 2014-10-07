@@ -7,12 +7,12 @@
 // This has successfully been integrated with OpenRemote as a sensor and device
 //
 // Supported methods include:
-// 	/status 			- return on/off status
-// 	/ 				- return brightness
-// 	/flash/<on_time>/<off_time>	- flash the lights with a specific on/off interval
-// 	/<byte> 			- set level (0 to 255)
-// 	/on 				- turn on
-// 	/off 				- turn off
+//      /status                         - return on/off status
+//      /                               - return brightness
+//      /flash/<on_time>/<off_time>     - flash the lights with a specific on/off interval
+//      /<byte>                         - set level (0 to 255)
+//      /on                             - turn on
+//      /off                            - turn off
 //
 
 #include <SyncLED.h>
@@ -51,11 +51,12 @@ byte flashMode = 0;
 unsigned long onTime = 1000;
 unsigned long offTime = 1000;
 byte flashState = 0;
+char clientline[BUFSIZE];
 
 void setup() {
 #if DEBUG
   //  turn on serial (for debuggin)
-  Serial.begin(9600);
+  Serial.begin(115200);
 #endif
 
   // start the Ethernet connection and the server:
@@ -94,7 +95,6 @@ void loop() {
     adjustLightLevel();
   }
   
-  char clientline[BUFSIZE];
   int index = 0;
   // listen for incoming clients
 #if defined(ARDUINO) && ARDUINO >= 100
@@ -113,11 +113,12 @@ void loop() {
         char c = client.read();
 
         //  fill url the buffer
-        if(c != '\n' && c != '\r' && index < BUFSIZE){ // Reads until either an eol character is reached or the buffer is full
+        if(c != '\n' && c != '\r' && (index+1) < BUFSIZE){ // Reads until either an eol character is reached or the buffer is full
           clientline[index++] = c;
           continue;
         }  
 
+        clientline[index] = 0;
         processRequest( client, clientline );
         
         break;

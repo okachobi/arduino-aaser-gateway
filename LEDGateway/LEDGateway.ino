@@ -29,6 +29,7 @@
 
 const char AASERHDR[]  PROGMEM  = { "AASER/1.0 " };
 uint8_t input[RF12_MAXDATA];
+uint8_t input_len = 0;
 RFM12B radio;
 
 static void sendOK(Stream& port)
@@ -98,13 +99,14 @@ static bool getArgs(char **arg, byte cnt, char *delim ) {
 
 static void processRequest(Stream& port, char *cmd)
 {
-  // Format of Input: ID COMMAND ARG1,ARG2,ARG3,...
-  char *space = " ";
-  char *comma = ",";
+  // Format of Input: COMMAND ID ARG1[,ARG2,ARG3,...]
+  char *space = " \n";
+  char *comma = ",\n";
   char *args[5];
   byte node = 0;
   
   char *command = strtok(cmd, space);
+
   char *id = NULL;
   if( command != NULL ) {
     id = strtok(NULL, space);
@@ -123,23 +125,30 @@ static void processRequest(Stream& port, char *cmd)
     // Turn the light OFF
     char buf[] = {'c',0,0,0};
     sendPkt( radio, port, node, buf, 4 );
+    sendOK( port );
     return;
     
   } else if(F_strncmp(command, F("ON"), 1) == 0) {
-    // <ID> ON [<LVL>] [<R,G,B>]
+    // ON <ID> [<LVL>] [<R,G,B>]
     // Lvl = 0 to 100 (%) - 0 indicates no change to current level
     // R,G,B values range from 0 to 255 per color - optional, but must be a triplet
-    // 10 ON 100 255,255,255 = All White
-    if( !getArgs( args, 1, space) || !getArgs( &args[1], 3, command ) ) goto parse_error;
+    // ON 10 100 255,255,255 = All White
+    if( !getArgs( args, 1, space) || !getArgs( &args[1], 3, comma ) ) goto parse_error;
+    
+    // WIP - do we support persistent level?  Need to be done
+    // at node, not gateway unless gateway tracks it...
+    //uint_8 newlvl = atoi( args[0] )
+    //float lvl = 1.0;
+    //if(newlvl != 0) {}
     
     float lvl = atof( args[0] ) / 100.0f;
-    byte r = atof( args[1] ) * lvl;
-    byte g = atof( args[2] ) * lvl;
-    byte b = atof( args[3] ) * lvl;
+    byte r = atoi( args[1] ) * lvl;
+    byte g = atoi( args[2] ) * lvl;
+    byte b = atoi( args[3] ) * lvl;
     
     char buf[] = {'c', r, g, b };
     sendPkt( radio, port, node, buf, 4 );
-    
+    sendOK( port );    
     return;    
   } else if(F_strncmp(command, F("FLASH"), 1) == 0) {
     // Set the light in flash mode (with On/Off interval)
@@ -148,13 +157,23 @@ static void processRequest(Stream& port, char *cmd)
     return;    
   } else if(F_strncmp(command, F("STATUS"), 2) == 0) {
     // Retrieve the status of the light
+    char buf[] = {'S','R'}; // status request
+    sendPkt( radio, port, node, buf, 2 );
+    sendOK( port );
     return;    
   } else if(F_strncmp(command, F("PSCENE"), 1) == 0) {
     // Program a Scene setting (EEPROM)
     return;    
   } else if(F_strncmp(command, F("SCENE"), 1) == 0) {
     // Select a Scene setting (will turn on if off)
-    return;    
+    if( !getArgs( args, 1, space) ) goto parse_error;
+    
+    byte scene = atoi( args[0] );
+    
+    char buf[] = {'p', (char) scene }; // status request
+    sendPkt( radio, port, node, buf, 2 );
+    sendOK( port );
+    return;  
   } else if(F_strncmp(command, F("MEM"), 1) == 0) {
     port.print( FS(AASERHDR) );
     port.print( F("200 ") );
@@ -208,14 +227,17 @@ void loop()
       
       byte theNodeID = radio.GetSender();
       
+      // Make packet copy here since ACK will erase buffers
+      memcpy( (void*)input, (const void *)radio.Data, *radio.DataLen );
+      input_len = *radio.DataLen;
+      
       // Always ack immediately
       if (radio.ACKRequested()) {
         radio.SendACK();
         delay(10);
       }
       
-      if( processNodePkt( radio, Serial, theNodeID, (char *) radio.Data, *radio.DataLen ) ) {
-        //      radio.Send(theNodeID, "ACK TEST", 8, true);
+      if( processNodePkt( radio, Serial, theNodeID, (char *) input, input_len ) ) {
         waitForAck(theNodeID);
         delay(5);
       }
@@ -264,8 +286,15 @@ static void announceMaster( RFM12B& radio, Stream& port )
 static bool processNodePkt( RFM12B& radio, Stream& port, byte sender, char *cmd, byte size )
 {
   switch( cmd[0] ) {
+    /*
     case 'S': // Status report
+        // When we receive a status report, we should store the status!? Or just print it?
+        if(cmd[1] != 'R') {
+          port.print( FS(AASERHDR) );
+          port.print( F("200 ") );
+        }
       break;
+    */
     case 'M': // Master broadcast
       port.print( FS(AASERHDR) );
       port.print( F("502 Detected duplicate master at ") );

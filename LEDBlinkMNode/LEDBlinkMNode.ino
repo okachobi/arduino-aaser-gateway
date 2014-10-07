@@ -1,3 +1,4 @@
+
 //
 // LEDNode
 //
@@ -12,13 +13,16 @@
 
 
 #include <stdlib.h>
+#include <EEPROM.h>
 #include <avr/pgmspace.h>
 #include <avr/wdt.h>
+#include <Wire.h>
+#include <BlinkM_funcs.h>
 #include <string.h>
 #include <RFM12B.h>
 
 #define SERIAL_BAUD      115200  // Used only for initial configuration - nodes typically aren't tethered
-#define NODEID           02      // Default node ID for this node - overriden by flash (use node command to change)
+#define NODEID           9      // Default node ID for this node - overriden by flash (use node command to change)
 #define NETWORKID        50      // Network ID
 #define FREQUENCY  RF12_433MHZ   // Match this with the version of your Moteino/Jeenode! (others: RF12_433MHZ, RF12_915MHZ)
 #define KEY  "ABCDABCDABCDABCD"  // encryption key
@@ -28,6 +32,7 @@
 #define RPIN             6       // Red Pin
 #define GPIN             9       // Green Pin
 #define BPIN             5       // Blue Pin
+#define SAVE_DELAY       2000    // Save after 2 seconds
 
 #define FS(x) (__FlashStringHelper*)(x)
 
@@ -37,24 +42,45 @@ uint8_t input_len = 0;
 RFM12B radio;
 uint8_t node = NODEID;
 uint8_t master_node = 0;
+uint8_t verbosity = 0; // serial verbosity level
 long last_command = 0;
 boolean settings_saved = true;
 byte tr = 0;
 byte tg = 0;
 byte tb = 0;
+
+/* No longer have to fade manually...
 byte cr = 0;
 byte cg = 0;
 byte cb = 0;
+*/
+byte blinkid = 0;
+byte script = 254;
 
 void setup()
 {
+  
   if( factoryResetRequired() ) resetFactoryDefaults();
  
   loadEEPROMSettings();
-        
+
+  delay ( 1000 ); // Allow BlinkM to boot
+  
+  pinMode( 9, OUTPUT );
+  
   randomSeed(analogRead(0));
   
   last_command = millis();
+
+  // This code only works with 1 i2c BlinkM device
+  BlinkM_begin();
+  blinkid = BlinkM_findFirstI2CDevice();
+  
+  if(tr != 0 || tg != 0 || tb != 0) {
+    BlinkM_fadeToRGB(  blinkid, tr, tg, tb );
+  } else if(script != 254) {
+    BlinkM_playScript( blinkid, script, 0, 0 );
+  }
   
   radio.Initialize(node, FREQUENCY, NETWORKID, 0, 35); // 0 = high power, 0x08 = 38.4, 17 = 19.2 kbps, 35 = 9600
   radio.Encrypt((byte*)KEY);
@@ -127,6 +153,11 @@ static void software_Reboot()
   }
 }
 
+//
+// Some of these commands won't make a lot of sense from a Node right now
+// but the code was based on the same as the Gateway- some cleanup
+// will need to be done...
+//
 static void processRequest(Stream& port, char *cmd)
 {
   // Format of Input: COMMAND ID ARG1,ARG2,ARG3,...
@@ -186,7 +217,14 @@ static void processRequest(Stream& port, char *cmd)
     return;    
   } else if(F_strncmp(command, F("FLASH"), 1) == 0) {
     // Set the light in flash mode (with On/Off interval)
-    return;    
+    return;
+    
+  } else if(F_strncmp(command, F("VERBOSITY"), 1) == 0) {
+    // Change serial verbosity level
+    if( !getArgs( args, 1, space) ) goto parse_error;
+    verbosity = atoi(args[0]);
+    EEPROM.write(5, verbosity);
+    return;
   } else if(F_strncmp(command, F("LVL"), 1) == 0) {
     return;    
   } else if(F_strncmp(command, F("STATUS"), 2) == 0) {
@@ -254,8 +292,8 @@ void loop()
       // Make packet copy here since ACK will erase buffers
       memcpy( (void*)input, (const void *)radio.Data, *radio.DataLen );
       input_len = *radio.DataLen;
-            
-      // Always ack immediately
+      
+      // Always ack immediately if requested
       if (radio.ACKRequested()) {
         radio.SendACK();
         delay(10);
@@ -265,14 +303,14 @@ void loop()
         waitForAck(theNodeID);
         delay(5);
       }
-      
+
     } else {
       // Just ignore bad packets....
       //Serial.print("BAD-CRC");
     }
   }
   
-  adjustLightLevel();
+  // adjustLightLevel();
   attemptFlashStore();
 }
 
@@ -300,7 +338,8 @@ static void attemptFlashStore()
 	EEPROM.write(1, tr);
         EEPROM.write(2, tg);
         EEPROM.write(3, tb);
-	settings_saved = true;
+        EEPROM.write(4, script);
+        settings_saved = true;
   }
   
 }
@@ -312,22 +351,38 @@ static bool processNodePkt( RFM12B& radio, Stream& port, byte sender, char *cmd,
 {
   switch( cmd[0] ) {
     case 'S': // Status report
+      // Unimplemented
       break;
     case 'c': // Change light level/color
+      // 'c', <r>, <g>, <b>
       tr = cmd[1];
       tg = cmd[2];
       tb = cmd[3];
+      BlinkM_stopScript( blinkid );
+      BlinkM_fadeToRGB(  blinkid, tr, tg, tb);
+      script = 254;
       invalidate();
       break;
-      
+    case 'p': // Play a particular script
+      // 'p', <scriptid>
+      script = cmd[1];
+      tr = tg = tb = 0;
+      BlinkM_playScript( blinkid, script, 0, 0);
+      // Save the settings in BlinkM case of power cycle
+      BlinkM_setStartupParams( blinkid, 0x01, script, 0, 0x08, 0x00 );
+      invalidate();
+      break;
     case 'M': // Master broadcast
-      port.print( FS(AASERHDR) );
-      port.print( F("200 Detected master at ") );
-      port.println( (byte) cmd[1], DEC );
-      master_node = (byte) cmd[1];
+      if( (byte) cmd[1] != master_node || verbosity > 1) {
+        port.print( FS(AASERHDR) );
+        port.print( F("200 Detected master at ") );
+        port.println( (byte) cmd[1], DEC );
+        master_node = (byte) cmd[1];
+      }
       break;
     default:
-      port.println( "Unknown?" );
+      port.print( "Unknown? : " );
+      port.println( cmd[0], DEC );
       break;
   }
   
@@ -345,6 +400,9 @@ static void loadEEPROMSettings()
   tr = EEPROM.read(1);
   tg = EEPROM.read(2);
   tb = EEPROM.read(3);
+  script = constrain( EEPROM.read(4), 0, 18 );
+  verbosity = constrain( EEPROM.read(5), 0, 5 );
+  
 }
 
 static bool factoryResetRequired()
@@ -376,6 +434,10 @@ static void resetFactoryDefaults()
         EEPROM.write(2, 0); // Green
         EEPROM.write(3, 0); // Blue
         
+        EEPROM.write(4, 254); // Script
+        
+        EEPROM.write(5, 0); // Verbosity
+        
 	// Clear virgin DWORD (face feed)
 	EEPROM.write(1020, 0xed);
 	EEPROM.write(1021, 0xfe);
@@ -400,6 +462,7 @@ static void doFlash()
 }
 */
 
+/*
 void adjustLightLevel()
 {
 unsigned long now = millis();
@@ -435,9 +498,11 @@ unsigned long now = millis();
         cb = newb;
         
         lastColorChange = now;
+
         analogWrite( RPIN, cr);
         analogWrite( GPIN, cg);
         analogWrite( BPIN, cb);        
     }
     
 }
+*/
