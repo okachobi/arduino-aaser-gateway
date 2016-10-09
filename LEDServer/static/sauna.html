@@ -1,0 +1,123 @@
+<!DOCTYPE HTML>
+<html>
+
+<head>
+  <script src="jquery.min.js"></script>
+	<script type="text/javascript">
+	window.onload = function () {
+
+		// dataPoints
+		var dataPoints1 = [];
+		var dataPoints2 = [];
+
+		var chart = new CanvasJS.Chart("chartContainer",{
+			zoomEnabled: true,
+			title: {
+				text: "Sauna Temperature and Humidity"
+			},
+			toolTip: {
+				shared: true
+
+			},
+			legend: {
+				verticalAlign: "top",
+				horizontalAlign: "center",
+                                fontSize: 14,
+				fontWeight: "bold",
+				fontFamily: "calibri",
+				fontColor: "dimGrey"
+			},
+			axisX: {
+				title: "chart updates every 3 secs"
+			},
+			axisY:{
+				prefix: 'Temp/RH  ',
+				includeZero: false
+			},
+			data: [
+			{
+				// dataSeries2
+				type: "line",
+				xValueType: "dateTime",
+				showInLegend: true,
+				name: "Humidity %" ,
+				dataPoints: dataPoints2
+			},
+			{
+				// dataSeries1
+				type: "line",
+				xValueType: "dateTime",
+				showInLegend: true,
+				name: "Temperature C",
+				dataPoints: dataPoints1
+			},],
+          legend:{
+            cursor:"pointer",
+            itemclick : function(e) {
+              if (typeof(e.dataSeries.visible) === "undefined" || e.dataSeries.visible) {
+                e.dataSeries.visible = false;
+              }
+              else {
+                e.dataSeries.visible = true;
+              }
+              chart.render();
+            }
+          }
+		});
+
+
+
+		var updateInterval = 3000;
+
+		var time = new Date;
+
+		var updateChart = function () {
+            $(function() {
+                        var options = {
+                            type: 'GET',
+                            success:
+                                function(responseJson, statusText, xhr)  {
+                                        if(responseJson['status'] == "ok") {
+                                            time = new Date();
+
+                                            // pushing the new values
+                                            dataPoints1.push({
+                                                x: time.getTime(),
+                                                y: responseJson.T
+                                            });
+                                            dataPoints2.push({
+                                                x: time.getTime(),
+                                                y: responseJson.H
+                                            });
+
+                                            // updating legend text with  updated with y Value
+                                            chart.options.data[1].legendText = "  Temperature: " + responseJson.T + "C";
+                                            chart.options.data[0].legendText = "  Humidity:  " + responseJson.H + "%";
+
+                                            chart.render();
+                                        }
+                                },
+                            url: "/lightgw/5/status",
+                            dataType: 'json'
+                        };
+                        $.ajax("/lightgw/5/status", options);
+            });
+
+		};
+
+		// generates first set of dataPoints
+		updateChart();
+
+		// update chart after specified interval
+		setInterval(function(){updateChart()}, updateInterval);
+	}
+	</script>
+	<script type="text/javascript" src="/static/canvasjs.min.js"></script>
+</head>
+<body>
+	<div id="chartContainer" style="height: 300px; width: 100%;">
+	</div>
+</body>
+
+
+</html>
