@@ -1,0 +1,269 @@
+{
+  "schema_version": 1,
+  "name": "Notify me when Sauna heats up",
+  "description": "This scenario reads a temperature sensor and when my Sauna is over 60 degrees C, it will email me, turn on the sauna light, and activate a beacon light that I made.  This uses Arduino based hardware over a 433Mhz network along with a http gateway written in Python.",
+  "source_url": false,
+  "guid": "ae3fa476656859dc5e6d30db031ab62d",
+  "tag_fg_color": "#ffffff",
+  "tag_bg_color": "#5bc0de",
+  "exported_at": "2016-10-09T15:16:37Z",
+  "agents": [
+    {
+      "type": "Agents::WebsiteAgent",
+      "name": "Sauna Temperature Reader",
+      "disabled": false,
+      "guid": "041c6dd86ae92e0b51d8ab08838ad032",
+      "options": {
+        "expected_update_period_in_days": "1",
+        "url": "http://192.168.0.20:3128/lightgw/5/status",
+        "type": "json",
+        "mode": "all",
+        "extract": {
+          "temperature": {
+            "path": "T"
+          },
+          "humidity": {
+            "path": "H"
+          },
+          "switch_1": {
+            "path": "SW1"
+          },
+          "switch_2": {
+            "path": "SW2"
+          }
+        }
+      },
+      "schedule": "every_2m",
+      "keep_events_for": 3600,
+      "propagate_immediately": false
+    },
+    {
+      "type": "Agents::PostAgent",
+      "name": "Turn off Sauna Light",
+      "disabled": false,
+      "guid": "1d03f38f8caed0597ae1e27e557e6f28",
+      "options": {
+        "post_url": "http://192.168.0.20:3128/lightgw/5/off/1",
+        "expected_receive_period_in_days": "1",
+        "content_type": "json",
+        "method": "get"
+      },
+      "schedule": "never",
+      "propagate_immediately": true
+    },
+    {
+      "type": "Agents::TriggerAgent",
+      "name": "Sauna hotter than 60",
+      "disabled": false,
+      "guid": "20a4497eae97970220385312d315fe13",
+      "options": {
+        "expected_receive_period_in_days": "2",
+        "keep_event": "false",
+        "rules": [
+          {
+            "type": "field>=value",
+            "value": "60",
+            "path": "temperature"
+          }
+        ],
+        "message": "ready"
+      },
+      "keep_events_for": 3600,
+      "propagate_immediately": true
+    },
+    {
+      "type": "Agents::PostAgent",
+      "name": "Turn on Sauna Light",
+      "disabled": false,
+      "guid": "3d0a20f2d1f751c808278bfc576135ec",
+      "options": {
+        "post_url": "http://192.168.0.20:3128/lightgw/5/on/1",
+        "expected_receive_period_in_days": "1",
+        "content_type": "json",
+        "method": "get"
+      },
+      "schedule": "never",
+      "propagate_immediately": true
+    },
+    {
+      "type": "Agents::EmailAgent",
+      "name": "Notify that Sauna is ready",
+      "disabled": false,
+      "guid": "539a2ab81d71db7af6400d98e873e037",
+      "options": {
+        "subject": "Sauna is ready for use",
+        "body": "The Sauna temperature is now above 60 degrees!",
+        "recipients": [
+          "youremail@somewhere.com",
+          "yourphonenumber@somesmsgateway.com"
+        ],
+        "expected_receive_period_in_days": "12"
+      },
+      "propagate_immediately": true
+    },
+    {
+      "type": "Agents::PostAgent",
+      "name": "Set upstairs light to normal",
+      "disabled": false,
+      "guid": "55f8b2e46a0c5997b4d299feddbbb3f9",
+      "options": {
+        "post_url": "http://192.168.0.20:3128/lightgw/9/scene/water",
+        "expected_receive_period_in_days": "1",
+        "content_type": "json",
+        "method": "get"
+      },
+      "schedule": "never",
+      "propagate_immediately": true
+    },
+    {
+      "type": "Agents::TriggerAgent",
+      "name": "Sauna colder than 60",
+      "disabled": false,
+      "guid": "72fe901deceef3f7604cfe6be0f422e0",
+      "options": {
+        "expected_receive_period_in_days": "2",
+        "keep_event": "false",
+        "rules": [
+          {
+            "type": "field<value",
+            "value": "50",
+            "path": "temperature"
+          }
+        ],
+        "message": "not ready"
+      },
+      "keep_events_for": 3600,
+      "propagate_immediately": true
+    },
+    {
+      "type": "Agents::DeDuplicationAgent",
+      "name": "Sauna ready or not",
+      "disabled": false,
+      "guid": "7f56b0b8d9055da8c9c07bfc1ef3894a",
+      "options": {
+        "property": "{{message}}",
+        "lookback": "1",
+        "expected_update_period_in_days": "1"
+      },
+      "keep_events_for": 3600,
+      "propagate_immediately": true
+    },
+    {
+      "type": "Agents::ChangeDetectorAgent",
+      "name": "Sauna Temperature filter",
+      "disabled": false,
+      "guid": "96a21020de41f26210cc3d69605f833e",
+      "options": {
+        "property": "{{temperature}}",
+        "expected_update_period_in_days": 1
+      },
+      "keep_events_for": 3600,
+      "propagate_immediately": true
+    },
+    {
+      "type": "Agents::TriggerAgent",
+      "name": "Sauna OnNotReady Event",
+      "disabled": false,
+      "guid": "cb2abe8e3089c54c99bb471615f59721",
+      "options": {
+        "expected_receive_period_in_days": "2",
+        "keep_event": "true",
+        "rules": [
+          {
+            "type": "field!=value",
+            "value": "ready",
+            "path": "message"
+          }
+        ]
+      },
+      "keep_events_for": 3600,
+      "propagate_immediately": true
+    },
+    {
+      "type": "Agents::PostAgent",
+      "name": "Set upstairs light to alert",
+      "disabled": false,
+      "guid": "e10a4cb7a40e46c3572e3db4b788fb45",
+      "options": {
+        "post_url": "http://192.168.0.20:3128/lightgw/9/scene/redflash",
+        "expected_receive_period_in_days": "14",
+        "content_type": "json",
+        "method": "get"
+      },
+      "schedule": "never",
+      "propagate_immediately": true
+    },
+    {
+      "type": "Agents::TriggerAgent",
+      "name": "Sauna OnReady Event",
+      "disabled": false,
+      "guid": "f808b4d8d42c088e9e21ee0b9e5b9c91",
+      "options": {
+        "expected_receive_period_in_days": "2",
+        "keep_event": "true",
+        "rules": [
+          {
+            "type": "field==value",
+            "value": "ready",
+            "path": "message"
+          }
+        ]
+      },
+      "keep_events_for": 3600,
+      "propagate_immediately": true
+    }
+  ],
+  "links": [
+    {
+      "source": 0,
+      "receiver": 8
+    },
+    {
+      "source": 2,
+      "receiver": 7
+    },
+    {
+      "source": 6,
+      "receiver": 7
+    },
+    {
+      "source": 7,
+      "receiver": 11
+    },
+    {
+      "source": 7,
+      "receiver": 9
+    },
+    {
+      "source": 8,
+      "receiver": 2
+    },
+    {
+      "source": 8,
+      "receiver": 6
+    },
+    {
+      "source": 9,
+      "receiver": 5
+    },
+    {
+      "source": 9,
+      "receiver": 1
+    },
+    {
+      "source": 11,
+      "receiver": 4
+    },
+    {
+      "source": 11,
+      "receiver": 10
+    },
+    {
+      "source": 11,
+      "receiver": 3
+    }
+  ],
+  "control_links": [
+
+  ]
+}
