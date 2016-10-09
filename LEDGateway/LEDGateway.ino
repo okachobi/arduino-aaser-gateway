@@ -14,12 +14,16 @@
 #include <avr/pgmspace.h>
 #include <string.h>
 
+enum {
+  DEV_LIGHT_TEMP_HUMIDITY = 1
+};
+
 #define SERIAL_BAUD 115200
 #define NODEID            1         // Node ID used for this Gateway Unit (1 is standard)
 #define NETWORKID        50         // Network ID
 #define FREQUENCY  RF12_433MHZ      // Match this with the version of your Moteino! (others: RF12_433MHZ, RF12_915MHZ)
 #define KEY  "ABCDABCDABCDABCD"     // encryption key
-#define ACK_TIME         50         // # of ms to wait for an ack
+#define ACK_TIME         200         // # of ms to wait for an ack
 #define RETRIES          5          // # of retries before giving up on a node
 #define BUFSIZE          25         // Maximum command length (allocated from SRAM, so be conservative)
 #define BLED             9          // LED for status
@@ -286,15 +290,53 @@ static void announceMaster( RFM12B& radio, Stream& port )
 static bool processNodePkt( RFM12B& radio, Stream& port, byte sender, char *cmd, byte size )
 {
   switch( cmd[0] ) {
-    /*
     case 'S': // Status report
         // When we receive a status report, we should store the status!? Or just print it?
         if(cmd[1] != 'R') {
           port.print( FS(AASERHDR) );
-          port.print( F("200 ") );
-        }
+          byte dev_type = (byte) cmd[1];
+          switch( dev_type ) {
+            case DEV_LIGHT_TEMP_HUMIDITY:
+              {
+                union u_tag {
+                 byte b[4];
+                 float fval;
+                } u;
+                byte switch1 = (byte) cmd[2];
+                byte switch2 = (byte) cmd[3];
+                
+                u.b[0] = (byte) cmd[4];
+                u.b[1] = (byte) cmd[5];
+                u.b[2] = (byte) cmd[6];
+                u.b[3] = (byte) cmd[7];
+                float temperature = u.fval;
+
+                u.b[0] = (byte) cmd[8];
+                u.b[1] = (byte) cmd[9];
+                u.b[2] = (byte) cmd[10];
+                u.b[3] = (byte) cmd[11];
+                float humidity = u.fval;
+                
+                port.print( F("200 STATUS "));
+                port.print( sender, DEC);
+                port.print( F(" ") );
+                port.print( dev_type, DEC);
+                port.print( F(" SW1=") );
+                port.print( switch1, DEC );
+                port.print( F(",SW2=") );
+                port.print( switch2, DEC );
+                port.print( F(",T=") );
+                port.print( temperature );
+                port.print( F(",H=") );
+                port.println( humidity );
+              }
+              break;
+             default:
+               port.println( F("404 Device Type not found") );
+             break;
+          }
+       }
       break;
-    */
     case 'M': // Master broadcast
       port.print( FS(AASERHDR) );
       port.print( F("502 Detected duplicate master at ") );
@@ -306,4 +348,3 @@ static bool processNodePkt( RFM12B& radio, Stream& port, byte sender, char *cmd,
   
   return false;
 }
-
