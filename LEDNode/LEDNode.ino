@@ -12,6 +12,7 @@
 
 
 #include <stdlib.h>
+#include <EEPROM.h>
 #include <avr/pgmspace.h>
 #include <avr/wdt.h>
 #include <string.h>
@@ -28,16 +29,21 @@
 #define RPIN             6       // Red Pin
 #define GPIN             9       // Green Pin
 #define BPIN             5       // Blue Pin
+#define SAVE_DELAY       2000    // Save after 2 seconds
+#define FADE_TIME        3000    // How quickly to fade between colors
 
 #define FS(x) (__FlashStringHelper*)(x)
 
-const char AASERHDR[]  PROGMEM  = { "AASER/1.0 " };
+const char PROGMEM AASERHDR[]  = { "AASER/1.0 " };
 uint8_t input[RF12_MAXDATA];
 uint8_t input_len = 0;
 RFM12B radio;
 uint8_t node = NODEID;
 uint8_t master_node = 0;
 long last_command = 0;
+long lastColorChange = 0;
+long lastColorCommand = 0;
+
 boolean settings_saved = true;
 byte tr = 0;
 byte tg = 0;
@@ -60,6 +66,8 @@ void setup()
   radio.Encrypt((byte*)KEY);
   Serial.begin(SERIAL_BAUD);
   sendOK(Serial);
+  
+  bitSet(TCCR1B, WGM12);
 }
 
 static void sendOK(Stream& port)
@@ -173,7 +181,7 @@ static void processRequest(Stream& port, char *cmd)
     // Lvl = 0 to 100 (%) - 0 indicates no change to current level
     // R,G,B values range from 0 to 255 per color - optional, but must be a triplet
     // 10 ON 100 255,255,255 = All White
-    if( !getArgs( args, 1, space) || !getArgs( &args[1], 3, command ) ) goto parse_error;
+    if( !getArgs( args, 1, space) || !getArgs( &args[1], 3, comma ) ) goto parse_error;
     
     float lvl = atof( args[0] ) / 100.0f;
     byte r = atof( args[1] ) * lvl;
@@ -272,7 +280,7 @@ void loop()
     }
   }
   
-  adjustLightLevel();
+  adjustLightLevel2();
   attemptFlashStore();
 }
 
@@ -314,10 +322,20 @@ static bool processNodePkt( RFM12B& radio, Stream& port, byte sender, char *cmd,
     case 'S': // Status report
       break;
     case 'c': // Change light level/color
+      port.print( FS(AASERHDR) );
+      port.print( F("200 Light Change (") );
+      port.print( (byte) cmd[1], DEC );
+      port.print( F(",") );
+      port.print( (byte) cmd[2], DEC );
+      port.print( F(",") );
+      port.print( (byte) cmd[3], DEC );
+      port.println(F(")"));
       tr = cmd[1];
       tg = cmd[2];
       tb = cmd[3];
+      lastColorCommand = millis();
       invalidate();
+      return true;
       break;
       
     case 'M': // Master broadcast
@@ -399,6 +417,48 @@ static void doFlash()
     
 }
 */
+
+void adjustLightLevel2()
+{
+unsigned long now = millis();
+
+    if(tr != cr || tg != cg || tb != cb) {
+      byte newr, newg, newb;
+      unsigned long passed = now - lastColorCommand;
+      float ratio = passed / 3000.0f;
+      
+      if(ratio >= 1.0) {
+              Serial.println(F("setting ratio good"));
+        // We should be AT our color destination
+        cr = tr;
+        cg = tg;
+        cb = tb;
+        analogWrite( RPIN, cr);
+        analogWrite( GPIN, cg);
+        analogWrite( BPIN, cb);
+        lastColorChange = now;
+        
+      /*Serial.print( F("200 Change Complete (") );
+      Serial.print( (byte) cr, DEC );
+      Serial.print( F(",") );
+      Serial.print( (byte) cg, DEC );
+      Serial.print( F(",") );
+      Serial.print( (byte) cb, DEC );
+      Serial.println(F(")"));
+      */
+      } else if(ratio > 0.0) {
+        newr = cr!=tr?map( passed, 0, FADE_TIME, cr, tr ):cr;
+        newg = cg!=tg?map( passed, 0, FADE_TIME, cg, tg ):cg;
+        newb = cb!=tb?map( passed, 0, FADE_TIME, cb, tb ):cb;
+        
+        lastColorChange = now;
+        analogWrite( RPIN, newr);
+        analogWrite( GPIN, newg);
+        analogWrite( BPIN, newb);
+      }
+      
+    }
+}
 
 void adjustLightLevel()
 {
